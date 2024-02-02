@@ -1,0 +1,911 @@
+---
+output: 
+  bookdown::pdf_document2:
+    toc: false
+    number_sections: false
+bibliography: bibliography.bib
+csl: apa.csl
+header-includes: \usepackage{setspace}\doublespacing
+---
+
+```{r setup, include=FALSE}
+
+# load libraries
+library(dplyr)
+library(lme4)
+library(ggplot2)
+library(knitr)
+library(tinytex) # added by Liz
+library(formatR) # added by Liz
+
+# set knitr options and working directory
+knitr::opts_chunk$set(echo = TRUE)
+#knitr::opts_knit$set(root.dir = "/Users/catrionasilvey/Documents/academic/ucl/bayes-factor")
+knitr::opts_knit$set(root.dir = "/Users/LizW/OneDrive - Nexus365/BF paper/produce paper files")
+
+# note- the code below reads data from folders called "case_study_data" and "output" these folders can be found at  https://github.com/silveycat/bayes-factor/tree/master/case_study_data
+# https://github.com/silveycat/bayes-factor/tree/master/output; you can also find the code for the simulations at https://github.com/silveycat/bayes-factor/tree/master
+
+# function to load lab libraries from GitHub
+loadFunctionsGithub <-function(urlFolder, urlRaw, listFunctions){
+  if (!require(httr)) {
+    stop("httr not installed")
+  } 
+  else {
+    print('----Downloading. Please wait----')
+  };
+  httr::GET(urlFolder)-> req
+  stop_for_status(req)
+  filelist <- unlist(lapply(content(req)$tree, "[", "path"), use.names = F)
+  urlFunctions <- grep("docs/tools/", filelist, value = TRUE, fixed = TRUE)
+  gsub("docs/tools/", "", urlFunctions) -> functions
+  if (length(listFunctions) == 0){ #load all
+    for (i in 1:length(functions)){
+      httr::GET(paste0(urlRaw, functions[i]), ssl.verifypeer = FALSE)-> temp
+      content(temp)->p3
+      eval(parse(text = p3), envir = .GlobalEnv)
+    } 
+  } else {
+    functions[functions %in% listFunctions]-> functionsIlike
+    for (i in 1:length(functionsIlike)){
+      httr::GET(paste0(urlRaw, functionsIlike[i]), ssl.verifypeer = FALSE)-> temp
+      content(temp)->p3
+      eval(parse(text = p3), envir = .GlobalEnv)
+    }
+  };
+  print('----Download completed----')
+}
+
+# call function to load relevant libraries
+urlFolder <- 'https://api.github.com/repos/n400peanuts/languagelearninglab/git/trees/master?recursive=1'
+urlRaw <- 'https://raw.githubusercontent.com/n400peanuts/languagelearninglab/master/tools/'
+
+# list functions to be loaded
+listFunctions <- c("myCenter.R", "lizCenter.R")
+
+loadFunctionsGithub(urlFolder, urlRaw, listFunctions)
+
+```
+
+
+```{r BfFUNCTION, include=FALSE}
+
+# Bf function from http://www.lifesci.sussex.ac.uk/home/Zoltan_Dienes/inference/Bence%20Bayes%20factor%20calculator.html. 
+
+# This function has options for a likelihood that is either normal- or t-distributed, and a model of H1 that is either uniform, or normal or t- (or Cauchy-) distributed, with the normal/t/cauchy models being 1- or 2-tailed. In addition, the 1-tailed models are compatible with any mode (unlike the Dienes, 2008, calculator that assumed that 1-tailed models had a mode of zero). Thanks to Bence Palfi for pulling various bits of my code together to make this one all-inclusive function!
+
+# BF function
+
+Bf<-function(sd, obtained, dfdata = 1, likelihood = c("normal", "t"), modeloftheory= c("normal","t","cauchy", "uniform") ,lower =0, upper=1, modeoftheory = 0, scaleoftheory = 1, dftheory = 1, tail = 2)
+
+{
+
+if(likelihood=="normal"){
+
+dfdata=10^10
+
+}
+
+if(modeloftheory=="normal"){
+
+dftheory = 10^10
+
+} else if(modeloftheory=="cauchy"){
+
+dftheory = 1
+
+}
+
+area <- 0
+
+normarea <- 0
+
+if(modeloftheory=="uniform"){
+
+theta <- lower
+
+range <- upper - lower
+
+incr <- range / 2000
+
+for (A in -1000:1000){
+
+theta <- theta + incr
+
+dist_theta <- 1 / range
+
+height <- dist_theta * dt((obtained-theta)/sd, df=dfdata)
+
+area <- area + height * incr
+
+}
+
+LikelihoodTheory <- area
+
+}else{
+
+theta <- modeoftheory - 8 * scaleoftheory
+
+incr <- scaleoftheory/200
+
+for (A in -1600:1600){
+
+theta <- theta + incr
+
+dist_theta <- dt((theta-modeoftheory)/scaleoftheory, df=dftheory)
+
+if(identical(tail, 1)){
+
+if (theta <= modeoftheory){
+
+dist_theta <- 0
+
+} else {
+
+dist_theta <- dist_theta * 2
+
+}
+
+}
+
+height <- dist_theta * dt((obtained-theta)/sd, df = dfdata)
+
+area <- area + height * incr
+
+normarea <- normarea + dist_theta*incr
+
+}
+
+LikelihoodTheory <- area/normarea
+
+}
+
+Likelihoodnull <- dt(obtained/sd, df = dfdata)
+
+BayesFactor <- LikelihoodTheory/Likelihoodnull
+
+BayesFactor
+
+}
+```
+
+
+```{r, include=FALSE}
+options(tinytex.verbose = TRUE) # chunk added by Liz
+```
+
+# Author Note
+
+A pre-print of this paper can be found at https://psyarxiv.com/m4hju. This link is also available on the authors' websites and has been shared via social media. This document was written as an R Markdown file and this file can be found on https://github.com/silveycat/bayes-factor. This repository also contains the case study data files and the code and output for the simulations. The case study is adapted from analyses of data reported in @singh_samara_wonnacott_2022.  
+
+The work is not under consideration at any other journal and has not been presented at any conferences. 
+
+
+\newpage
+
+# Abstract
+
+In psychology, we often want to know whether or not an effect exists. The traditional way of answering this question is to use frequentist statistics. However, a significance test against a null hypothesis of no effect cannot distinguish between two states of affairs: evidence of absence of an effect, and absence of evidence for or against an effect. Bayes factors can make this distinction; however, uptake of Bayes factors in psychology has so far been low for two reasons. Firstly, they require researchers to specify the range of effect sizes their theory predicts. Researchers are often unsure about how to do this, leading to the use of inappropriate default values which may give misleading results. Secondly, many implementations of Bayes factors have a substantial technical learning curve. We present a case study and simulations demonstrating a simple method for generating a range of plausible effect sizes, i.e. a model of $H_1$, which we illustrate using mainly the estimates from frequentist mixed-effects models (because of their widespread adoption), but also using Bayesian model comparison with Bayesian hierarchical models (which have increased flexibility). Bayes factors calculated using these estimates provide intuitively reasonable results across a range of real effect sizes. The approach provides a solution to the problem of how to come up with principled estimates of effect size, which will be applicable in many but not all situations.
+\newpage
+
+# Introduction {#intro}
+
+Do older people exert more prosocial effort than younger people [@lockwood2021]? Does high talker variability in training examples make it easier for non-native speakers to learn Mandarin tones [@dong2019effects]? Does informing people about the scientific consensus help correct false beliefs about climate change [@vanStekelenburg2021]? These research questions, drawn from across the psychological sciences, illustrate that we are often interested not only in the size of an effect, but in whether or not an effect exists at all.
+
+The traditional way of determining the existence of an effect is to use frequentist statistics. In this approach, we begin by assuming that the null hypothesis ($H_0$) is true: older people and younger people exert the same amount of prosocial effort; high-variability training and low-variability training are equally beneficial for Mandarin tone learning; and people's false beliefs about climate change remain unchanged after they are informed of the scientific consensus. Given the truth of $H_0$, we then ask: what is the probability of observing data at least as extreme as the data we observed? Prior to collecting the experimental data, we set $\alpha$, the probability below which we will reject $H_0$. A standard frequentist test then returns one of two results. Either $p<\alpha$, $H_0$ is rejected, and we conclude that there is an effect, or $p\geq\alpha$ and we are unable to reject $H_0$. However, crucially, the latter result does not discriminate between two possible states of affairs: a) we have evidence that $H_0$ is true, i.e. there is no effect, and b) we do not have sufficient evidence to tell whether or not $H_0$ is true.
+
+We might want to distinguish these possibilities for several reasons. For the first research question, if older people and younger people show equivalent levels of prosocial behavior, this is interesting in itself, suggesting this behavior is stable across the lifespan. For the second research question, previous literature [@lively1993training] suggests we should find an advantage for high-variability training; if we fail to replicate this advantage, we want to know whether our data actually provide evidence against it or are simply ambiguous. For the third research question, if there is evidence that informing people about the scientific consensus does not help correct false beliefs, science communicators should not waste time on this strategy, but if we simply do not yet have evidence one way or another, we should collect more data before dismissing the strategy out of hand.
+
+An alternative approach that solves this problem is to use Bayes factors^[A further alternative is to test for equivalence (and thus the absence of the null) using two one-sided frequentist tests (TOST) or the Bayesian highest density interval region of practical equivalence (HDI-ROPE). See @Linde2021 for a comparison of these approaches.] [@DienesTheory; @jeffreysbook; @kass1995bayes; @Verhagen2014]. Instead of assuming that the null hypothesis is true, we compare the probability of the data under $H_0$ to the probability of the data under a specific hypothesis of interest $H_1$. Usually, $H_0$ is a point hypothesis, encoding the theory that the effect is exactly 0, whereas $H_1$ can be modeled as a distribution over the values an observed effect might be expected to take on, given a scientific context. For deriving the probability of the data given $H_1$, the probability we calculate is therefore a weighted average, taking into account both the probability of the data given a particular effect size (known as the likelihood) and how probable that effect size is based on a theory (i.e., the model of $H_1$). To obtain $BF_{10}$, the Bayes factor for $H_1$ against $H_0$, we divide the probability of the data under $H_1$ by the probability of the data under $H_0$. If the resulting value is larger than 1, the data are more probable under $H_1$ than under $H_0$. If it is smaller than 1, the data are more probable under $H_0$ than under $H_1$. The Bayes factor thus quantifies how much more confident we should be in $H_1$ compared to $H_0$, or vice versa, now that we have observed the data. While a Bayes factor is a continuous measure, @jeffreysbook suggested 3 as the lower bound above which we should pay attention to evidence for $H_1$; thus by symmetry we can take $\frac{1}{3}$ as the upper bound below which we should pay attention to evidence for $H_0$. While Jeffreys uses the term 'substantial' for this level of evidence, here we use the revised terminology 'moderate' proposed by @lee2014bayesian, as this better captures the degree of evidence we are talking about. To situate this with reference to $p$-values, if the effect size we obtain is roughly the same as our $H_1$ predicted, a Bayes factor of 3 in favor of $H_1$ corresponds to a $p$-value of around .05 [@Dienes2014]. Indeed, our experience in generating Bayes factors with real data is that in cases where we find a Bayes factor roughly greater than 3, we generally also find a $p$-value less than .05 (though there is in fact no monotonic relation between Bayes factors and $p$--values). However, where we find a $p$-value greater than .05, the Bayes factor has the advantage of disambiguating whether we have evidence for no effect ($BF < \frac{1}{3}$) or no evidence to speak of either way ($\frac{1}{3} < BF < 3$).
+
+Bayes factors, then, can provide an intuitive answer to the question of whether or not an effect exists. In addition to this, Bayes factors offer a number of other advantages. Firstly, unlike $p$-values, they provide a continuous measure of the evidence: while threshold values can be useful as a heuristic, the change in evidence as the Bayes factor increases or decreases is quantitative rather than qualitative in both directions. Secondly, Bayes factors as a measure of evidence are not sensitive to optional stopping (Rouder 2014), making them ideal for use in fields where samples are hard to obtain, such as developmental research or or research with specialized populations. Thirdly, inference using Bayes factors is not affected by whether the hypothesis was formulated before or after observing the data, nor in principle do Bayes factors need to be corrected for multiple testing as such. (Situations where multiple testing corrections seem appropriate arise for a number of reasons that do need to be addressed:  one may have to consider, however, whether or not the hypotheses in a multiple testing situation had low prior probability; or consider the evidence that all tests combined give to a theory - see [@dienes2016bayes; @dienes2021]  for further discussion); pre-registration and division of analyses into planned and exploratory are also advised to remove bias from the inferential chain from data to theory). In all these ways, Bayes factors tend to match better with researchers' intuitions than classical frequentist statistics [@Dienes2011].
+
+However, uptake of Bayes factors in the psychological sciences has not so far been particularly high. Beyond the fact that there are currently many competing recommendations regarding how Bayes factors should be used [@bayesian_opinions], two obstacles may account for this. The first is that Bayes factors require the researcher to be explicit about the range of effect sizes their theory predicts. In cases where the previous literature does not provide a clear estimate, researchers are sometimes at a loss for how to do this in a principled yet accessible way. While some software packages provide "default" values for modelling $H_1$ [e.g. @bayesfactor], the use of unprincipled estimates of predicted effect size is problematic. A Bayes Factor is a ratio representing how strongly the data support one theory (i.e. the one being tested) over another (the null). It is therefore only sensible if we have a sensible model of the predictions of the theory being tested in the current experimental context [@vanpaemel2020strong]. Default models make assumptions which may lead to distributions of predicted values which include highly implausible values.  The resulting Bayes Factor ratio is therefore not meaningful as a test our theory and if, as is generally the case, the default parameters are an overestimation of the scale of the effect predicted,  this may lead to spurious evidence for $H_0$ [@Nicenboim2016; @dienes2023]. The second obstacle is that many implementations of Bayes factors require the researcher to get to grips with new software that has a steep learning curve. An approach that allows researchers to calculate Bayes factors on the basis of output from the statistical models they are already using would be more accessible and would potentially encourage greater uptake of this method in the field.  
+
+The aim of this paper, then, is twofold. One is to outline how a researcher can use constraints inherent in their data to define a plausible maximum effect, and from there derive a distribution that represents their $H_1$. We refer to this as the motivated-maximum approach. Another aim is to demonstrate how Bayes Factors can be simply computed by researchers who are already using mixed-effects models implemented in lmer [@lme4] to analyse their data. Methods that model the hierarchical structure of the data are the most appropriate way to analyse data that involve repeated or nested measurements, such as when a number of participants are tested on a number of items (a type of data that is ubiquitous across the psychological sciences) and have become widespread in the language sciences (the research area of the first and last author).^[While this paper provides examples of the use of Bayes factors with estimates from mixed-effects models, Dienes method can be applied in conjunction with other frequentist methods such as $t$-tests or ANOVA. See @dienes2012 and @ziori2015 for examples.] The Dienes method for computing Bayes Factors has the benefit of requiring only two numbers to represent the data relevant to the hypothesis being tested: a mean difference and the associated standard error. We demonstrate how these may be obtained from the beta and standard error of the coefficient for a fixed effect in a mixed effect model. We also show how the motivated maximum approach may allow us to use other fixed effect coefficients within the same model to derive the scale factor parameter which informs the model of $H_1$, which  is the third and final value needed for computing the Bayes Factor under the Dienes method. Note that while all of our examples use logistic mixed effects models, as recommended for use in analyzing data with a binary response [@jaeger2008], it is equally possible to compute a Bayes Factor using the beta and standard errors from the fixed effects coefficients in a linear mixed effects as the data summary, and indeed the same is true for the coefficients of linear and logistic regression more broadly. The motivated maximum approach which we outline may also be applied more broadly; however the method does require that the researcher can define a meaningful baseline or lowest expected performance which is most straightforward in the case of binary data where there is a notion of chance performance. However it could also hold in other situations (for example with response time data there may be a minimum plausible response time which could be used be a baseline).  Finally, in the current paper we only explore the case where we are considering difference relating to binary predictors, such as where there are two experimental conditions.  
+
+The advantage of this approach is that, while it still requires a researcher to think carefully about their theory and translate it into a relevant $H_1$, it does not require them to master any additional technical skills beyond those they already possess. We present simulations showing that using the Dienes method with motivated-maximum estimates results in intuitively reasonable Bayes factors across a variety of cases. We also provide evidence that we get qualitatively similar results if we apply the motivated maximum approach to determine the priors for $H_1$, but use an alternative common approach to computing Bayes Factors with mixed models, namely, comparing two full Bayesian hierarchical models. Finally, we outline the implications of our results for researchers to consider when thinking about experimental design.
+
+
+
+
+# Methods {#methods}
+
+This paper will use the method outlined in @Dienes2014 for calculating Bayes factors that quantify the evidence for a specific alternative hypothesis $H_1$ compared to the null hypothesis $H_0$. The model of $H_0$ is simple: it assumes the effect is 0. The remaining elements we need in order to calculate the Bayes factor are:
+
+* a statistical summary of the data
+* a model of $H_1$
+
+## Summary of the data {#data-summary}
+
+A reasonable summary of the evidence the data provides with respect to a specific effect of interest is the parameter estimate for this effect and its standard error [@Dienes2014]. For experiments which involve multiple trials per participant, mixed-effects models are the most appropriate analysis method (see @lme4 for a frequentist solution; we discuss the Bayesian approach later). In the examples presented in this paper, we focus on logistic models, but the same principle applies for linear mixed-effects models. In both cases, we can use the parameter estimate and associated standard error for the relevant coefficient from the output of the mixed-effects model as our summary of the data.^[In the case of logistic regression, the estimate and standard error are in log-odds space. The model of $H_1$ must take this into account, as we describe below. In both the linear and the logistic case, the calculation of the Bayes factor rests on the assumption that parameter estimates are drawn from a normal distribution across samples -- the same principle that underlies the calculation of the standard error and associated $t$ and $z$-statistics in a frequentist analysis.]  
+
+Note that in doing this, we assume that the estimate and standard error are a good representation of the data. This will not necessarily hold if the data violate the assumptions of mixed-effects regression [@schielzeth2020robustness]. However, in this case the concern would apply equally to the frequentist results from the mixed-effects model itself as to the Bayes factor calculated on the basis of this output. Similarly, there is considerable debate about best practice in constructing mixed effect models, for example: Should a maximum random slopes structure be used? What should be done in the case of non-convergence etc.[@barr2013random;@Bates2015;@matuschek2017balancing]. These choices will affect the standard error terms for the fixed effects, and thus the computation of either a frequentist *p* value or a Bayes factor on the basis of this output. In the current paper, we do not address these questions about best practices in constructing mixed effects models. Instead, we assume a reader who is already using mixed effect models, and thus has already determined how to answer these questions when analysing their dataset, but who wishes to calculate Bayes Factors rather than (or in addition to) *p* values on the basis of the output.^[NB The examples we use in the paper assume a maximum random effects structure and adhere to the principle of marginality, i.e. including both interaction and constituent main effects. However, the logic of the Bayes Factor computation which we aim to exemplify is not affected by these choices]
+
+## Model of $H_1$ {#model-h1}
+
+The final component we need in order to calculate the Bayes factor is the one that often gives researchers the most difficulty: the model of $H_1$. The model of $H_1$ is the plausibility of different effect sizes under our theory. One misconception is that we have to be very precise in our predictions. While we do want to avoid an overly vague $H_1$ that includes implausible values, since this can result in spurious evidence for $H_0$, we do not have to know exactly what effect size we expect to observe: all we have to do is translate the predictions of our theory into a distribution over probable effect sizes. This can be easier than it sounds.  The starting point is to choose a distribution type, based on sensible assumptions. One common choice of distribution is the normal distribution
+This can represent the expectation that smaller effects are more probable than larger effects, if it has a mean (and mode) of zero. The researcher must specify two parameters: the mean and the standard deviation. Note that the *mean* encodes what we expect to be the most probable effect size. At first glance, it might seem that this should be set to the rough predicted effect size. However, note that this would then make larger and smaller effects symmetrically less probable. In psychology, our effect sizes are generally small and we usually expect smaller effects to be more probable than larger effects. This is better captured by setting the mean to zero. The most probable effect is then 0, with larger positive and negative effects symmetrically less probable. A normal $H_1$ with a mean of 0 is harder to discriminate from $H_0$, which makes it a more stringent test: if we find evidence for $H_1$ using this model, we may be correspondingly more persuaded in favor of our theory.
+
+The standard deviation encodes the probable range over which the effect might vary. If specifying a mean of 0, the researcher may choose to set the SD to a rough predicted effect size. Because of the properties of the normal distribution, this encodes the prediction that the observed effect is unlikely to be more than twice this predicted value. In many cases, this is a reasonable prediction; however, the researcher should check that this makes sense with reference to their specific theory and measurement scale, rather than using it as a default.
+Note that a normal distribution centered on 0 encodes a non-directional hypothesis: positive and negative effects are equally probable. If our $H_1$ is directional - e.g., the theory predicts that learning in the experimental condition will be better than learning in the control condition, and the reverse would actually be counter to our theory -- then we can model this by instead using a half-normal distribution, where negative values are given a probability of 0. This is true all of the examples we consider in the current paper. 
+
+For the remainder of this paper, we will model $H_1$ as a half-normal distribution with a mode of 0 and a standard deviation corresponding to our rough estimate of expected effect size. This encodes a directional theory where the theory predicts only zero or positive effects, smaller effects are more probable than larger effects, and the maximum effect we might observe is around twice the expected effect size. A useful property of this model is that, if we can derive a maximum effect, we can then work backwards and halve this to obtain an expected effect size to use as the SD of our half-normal distribution. It is this property that underlies the motivated-maximum approach. However note that in different circumstances, the assumptions of this distribution might not be appropriate. For example, we might have a non-directional prediction so that we should use a full rather than half normal. Other non-normal distributions might also be more appropriate, for example, if we might believe that all values within a range are equally likely we could use a uniform; if we believe that smaller values are more likely but have strong reason to be believe that the expected effect will be small relative to the maximum we might chose a Cauchy (where the maximum is around 7 times the scale factor, rather than 2 times as in the normal case) (see Dienes 2019 for further discussion). The researcher must determine which distribution is appropriate with reference to their specific theory. 
+Note also that picking a distribution type - based on sensible assumptions – is not the same as using defaults since we still have to specify the scale factors for those distributions that establish a realistic range of effect sizes predicted by our particular $H_1$ (as tested in this experimental context). Specifically, we need a predicted effect size. How can this be obtained?
+
+The most obvious way to obtain a predicted effect size is to consult the previous literature. In cases where a well-powered previous study exists investigating a similar enough question -- or, better yet, a meta-analysis that takes into account the reliability of many previous studies to come up with a best estimate -- this may be the most appropriate option. However, until recently, effect sizes were not routinely reported in much of the psychological literature [@effectsizes]; in applied linguistics, for example, the rate of effect size reporting is around 50% [@effectsappliedling]. Even where effect sizes are reported, they tend to be standardized rather than raw. While standardized effect sizes may sometimes be useful for comparing effects across studies, they are often not well-suited for Bayes factor analyses because they are influenced by factors irrelevant to the theoretical predictions we want to formalize in our model of $H_1$, such as measurement error. On the other hand, raw effect sizes will not be comparable unless the design of the previous and the current experiment are very similar. If no sufficiently similar previous experiment exists in the literature, a researcher could instead choose to run a pilot study in order to calibrate the expected effect size. However, pilot studies tend to have small samples and thus to be unreliable in their estimates of effect sizes; furthermore, researchers are more likely to follow up on pilot studies that produce large effects, resulting in systematic overestimation effects in pilot studies that are used to inform statistical analyses [@albers2018power; @dienestalk].
+
+A third strategy is for a researcher to use information from independent sub-samples of their own data to inform their estimate of probable effect size. For example, imagine a researcher has previously observed the effect of an experimental manipulation in a study with adult participants. The researcher now wants to investigate the effect of the same manipulation in children. It might be reasonable to use the effect size observed in adults as the effect size our $H_1$ predicts we will observe in children, as we have done in previous work [@sinkeviciute2019; @wonnacott2017]. 
+
+These strategies are ad hoc: they rely on the researcher having access to comparable data from other studies, or independent groups within the same study. This paper will focus on a more general approach that instead looks at the data from the study currently being analysed and asks: what is the maximum effect we could observe in these data? This *motivated-maximum approach* is similar in spirit to the 'room-to-move heuristic' described in @DienesTheory; however, rather than using one condition as a benchmark to define the maximum difference that could be observed between conditions, here we consider as our maximum the situation where one condition is at a baseline level (here chance) and the other condition has the maximum value possible based on the grand-mean. We first consider a simple case involving one binary predictor variable, where our $H_1$ is that there is a main effect. We demonstrate that in this case we may be able to estimate the effect as equal to the difference between the grand-mean and the baseline (i.e. chance). We then consider a more complex case involving two interacting binary predictor variables where our $H_1$ is that there is an interaction. We demonstrate that this case, we may be able to base our estimate on twice the difference between the grandmean and the baseline (chance).  
+
+
+Note that while all the experiment designs described below are drawn from the language sciences, this is only for the purposes of illustration: the approach is equally applicable to similar experiment designs across other fields of psychology.
+
+*Case 1.* Imagine a study investigating whether word learning benefits from high-variability materials - i.e. hearing words produced by multiple talkers. Adult participants are exposed to words and referents in a novel language- all words are heard equally frequently, but for half of the words, they are always produced by the same talker (low-variability exposure) and for half of the words the tokens come from six different talkers. After exposure, a 2-alternative-forced-choice (2AFC)  post-test is administered in which participants hear one of the words from training and must identify the correct referent from a choice of two. Our hypothesis, based on previous work [@barcroft2005; @sinkeviciute2019], is that high-variability training will lead to better vocabulary learning. However, we may not know exactly how big this improvement will be. A reasonable assumption for motivating a maximum effect is if the lowest performing condition is at a meaningful baseline, such as chance. A further constraint comes from the average performance the researcher actually observes across conditions in the data. 
+
+In a design where predictors are centered, the intercept term $i$ in a mixed-effects model represents the grand mean, or the average of performance in the two conditions. If performance in the lowest performing condition is $l$ and in the high performing condition is $h$:
+
+$$
+\begin{aligned}
+  i = (h + l)/2\\
+  2i = (h + l)\\
+  h = 2i - l
+\end{aligned}
+$$
+If $d$ is the difference between conditions (the effect of condition):
+
+$$
+\begin{aligned}
+  d = h - l
+\end{aligned}
+$$
+
+Substituting for $h$:
+
+$$
+\begin{aligned}
+  d = (2i - l) - l\\
+  d = 2i - 2l
+\end{aligned}
+$$
+
+
+The motivated maximum effect is twice the intercept. Using the heuristic described above, we set the expected effect $s$ to be half this value:
+
+$$
+\begin{aligned}
+  s = i - l \\
+\end{aligned}
+$$
+In the case where the test trials are 2AFC as described above, our baseline performance is chance which corresponds to .5 proportion correct, or 0 when transformed to log-odds. The difference between conditions $d$ is at its maximum when the mean performance in the lower condition is at this baseline i.e. $l=0$. Then the equation simplifies to:
+
+$$
+\begin{aligned}
+  s = i \\
+\end{aligned}
+$$
+
+
+We therefore set the standard deviation of the half-normal distribution that is our model of $H_1$ to equal the intercept from our mixed-effects model. An intuition for why this is reasonable is as follows. If there were no effect of condition, $s = (l + h)/2 = l = h$. So if performance in either condition is above a chance baseline of 0, the more scope there is for there to be a difference between them, and so the more the evidence should count against there being a difference should the sample difference be close to zero.  
+
+Note that in cases where baseline performance is not 0, we will instead set the standard deviation to equal the intercept minus the baseline value. For example, in a 3AFC task, chance is .33 proportion correct, or -0.69 log-odds; we would therefore set the standard deviation to equal $i + 0.69$.
+
+
+*Case 2.* Now suppose that instead of investigating vocabulary learning, we are interested in whether multi-talker, high-variability (HV) phonetic training improves learners’ ability to discriminate non-native phoneme contrasts more than single-talker, low-variability (LV) training  [@dong2019effects;@logan1991training; @BREKELMANS2022104352]. The condition manipulation here is between participants, so that half of the participants are exposed to exemplars words produced by multi-talkers and half are exposed only to a single-talker. In addition, we expect that our participants could have some ability to discriminate the contrast even before exposure, so we use a pre-/post- design where participants are administered a 2AFC discrimination test before and after training. We thus have one within-subjects predictor, test-session (pre-test vs. post-test) and one between-subjects predictor, condition (LV vs. HV) and we are interested in the interaction between test-session (improvement from pre-test to post-test) and condition (HV vs. LV): do participants in the HV condition improve more from pre-test to post-test than participants in the LV condition? Following previous literature [@lively1993training], we may expect HV training to lead to more improvement from pre-test to post-test than LV training. Again, though, we may not have strong expectations for how much better we expect improvement in the HV condition to be.
+
+As for Case 1, we can use the intercept and a measure of baseline lowest performance to constrain the maximum interaction effect that we might observe. We assume that the maximum interaction would occur where a) both conditions are at baseline in the pre-test and b) there is no improvement from pre-test to post-test in the LV condition. $l$ is our baseline, or the lowest performance we expect; $h$, here, is performance in the one cell that deviates from baseline, post-test in the HV condition. Again, if both predictors are centered, the intercept $i$ from a mixed-effects model represents the grand mean performance across cells in the design:
+
+
+$$
+\begin{aligned}
+  i &= (l + l + l + h)/4\\
+  i &= (3l + h)/4
+\end{aligned}
+$$
+
+Expressing $h$ in terms of our known quantities, $i$ and $l$:
+
+$$
+\begin{aligned}
+  4i &= 3l + h\\
+  h &= 4i - 3l
+\end{aligned}
+$$
+
+The interaction effect ($d$) is the difference between the improvement from pre-test to post-test in the HV condition and the improvement from pre-test to post-test in the LV condition:
+
+$$
+\begin{aligned}
+  d &= (h - l) - (l - l)\\
+  d &= h - l\\
+\end{aligned}
+$$
+Substituting for $h$:
+
+$$
+\begin{aligned}
+  d &= (4i - 3l) - l\\
+  d &= 4i - 4l
+\end{aligned}
+$$
+Using the same heuristic as above, we set the expected effect $s$ to be half this value:
+
+$$
+\begin{aligned}
+  s = 2i-2l\\
+\end{aligned}
+$$
+Again, in the case where test trials are 2AFC, chance corresponds to .5 proportion correct and hence $l = 0$. Thus the expected effect $s$ in this case is maximum difference $d$ is:
+$$
+\begin{aligned}
+  s = 2i\\
+\end{aligned}
+$$
+
+
+For the interaction, we set the standard deviation of the half-normal distribution that is our model of $H_1$ to equal twice the intercept from our mixed-effects model.
+
+An alternative method for Case 2 sets the standard deviation of the $H_1$ distribution to equal instead the main effect of test-session from the mixed-effects model. We outline the logic for generating this estimate and the results from simulations in the Supplemental Materials. Here, we focus on the intercept-based method outlined above, since our simulations find it performs better across a wide range of cases (though see caveats in the discussion below). It is also worth noting that this alternative method does not require that the researcher can define a meaningful baseline in terms of lowest expected performance.  
+
+There are important caveats to the motivated-maximum approach. The first is that, when using a distribution where the expected effect is set as the scale factor, the expected effect must be positive (since a scale factor such as the standard deviation cannot be negative). The second caveat is that the motivated-maximum approach as described above can only be used in the case of binary predictors; we are currently working on developing an alternative method for the case of a continuous predictor. The third, more general consideration is that the motivated-maximum approach should not be applied as a default. The difference between the intercept and a baseline can be a good estimate to use as a scale factor for $H_1$, but the researcher should first check that the assumptions stated above hold for their data and their experimental design. For example, there may be additional known constraints making the logic of the model of $H_1$ invalid. For example, in case 1, if it were known that LV would be zero, then the maximum difference estimated is directly determined by the sample difference obtained, and a false theory will never get evidence against it [see @DienesTheory, for the severeness of a test as a criterion of how adequately $H_1$ has been modeled; we discuss this later]. A Bayes factor is only meaningful inasmuch as it tests an $H_1$ that formalizes the predictions of a theory. For case 1, the theory tested predicts that in the population the higher condition is higher than the lower; and that the lower could be any value from baseline (but not lower) up to (almost) the upper condition. For case 2, the theory tested predicts that the population change from pre-test to post-test is greater for the higher condition than the lower; and that all conditions apart from higher post-test could be baseline (but not lower) to (almost) as high as higher post-test.  
+
+In addition, the researcher should always conduct robustness checks, as we will demonstrate in the case study below, to examine the extent to which their conclusion depends on the particular model of $H_1$ they have chosen. In practice we formalize this requirement by specifying Robustness Regions [@DienesTheory].
+  
+
+Having set up the logic of the motivated-maximum approach, we will now go on to present 1) a case study of its use in practice and 2) results from simulations investigating how the approach fares across a range of possible data sets.  
+
+*Note: code for the case study is embedded below and can also be found on github https://github.com/silveycat/bayes-factor/tree/master along with relevant data files. This study was not pre-registered* 
+
+
+# Results {#results}
+
+## Case study {#case-study}
+
+```{r load_data, include=FALSE}
+# note: these data files can be found https://github.com/silveycat/bayes-factor/tree/master/case_study_data
+
+#Experiment 1 Children: Incidental Learning of Homophonic Spellings - Simple constraints
+Experiment1_Children <- read.csv("case_study_data/Experiment1_Children_test_data.csv", header=TRUE)
+
+#Experiment 3 Children: Explicit Learning of Homophonic Spellings - Simple constraints
+Experiment3_Children <- read.csv("case_study_data/Experiment3_Children_test_data.csv", header=TRUE)
+
+##Combine Experiment 1 and Experiment 3 Children
+lme_Children_implicit_vs_explicit_fill.df = merge(Experiment1_Children, Experiment3_Children, all=TRUE)
+
+#subsetting to get data for Fill-in-the-Blanks only
+lme_Children_implicit_vs_explicit_fill.df = subset(lme_Children_implicit_vs_explicit_fill.df, procedure !="legality_judgment") 
+
+##make sure the variables are factors
+lme_Children_implicit_vs_explicit_fill.df$participantCode = factor(lme_Children_implicit_vs_explicit_fill.df$participantCode)
+lme_Children_implicit_vs_explicit_fill.df$experiment = factor(lme_Children_implicit_vs_explicit_fill.df$experiment)
+
+```
+
+We now demonstrate how to apply the motivated-maximum approach to calculate a Bayes factor, using data and analyses drawn from @singh_samara_wonnacott_2022. The authors investigate the development of children's knowledge of graphotactic (spelling) patterns. In the specific analysis reproduced here, they contrast the knowledge of children who learned graphotactic patterns implicitly (by mere exposure) and children who learned the same patterns explicitly (by being told the rule that generates the patterns). In both experiments, children's knowledge is assessed via a 2AFC `fill-in-the-blanks' task where they are given the beginning and end of a word and asked to drag the correct vowel into the gap. Figure \@ref(fig:case-study-plot) shows mean accuracy in the two experiments.
+
+```{r case-study-plot, fig.cap = "Children's accuracy on fill-in-the-blanks task after implicit or explicit learning of spelling rules", echo=FALSE}
+aggregated.data <- aggregate(accuracy ~ participantCode + experiment + CI_low + CI_high, lme_Children_implicit_vs_explicit_fill.df, FUN=mean)
+
+#create ggplot
+figure <- ggplot(aggregated.data, aes(x = experiment, y = accuracy))
+figure + geom_violin(aes(fill = experiment)) + scale_y_continuous("Mean Proportion Correct\n") + 
+  scale_x_discrete(name = "\nExperiment", labels = c("implicit", "explicit")) + 
+  geom_errorbar(aes(ymin=CI_low, ymax=CI_high), width=.2, position=position_dodge(.9)) + 
+  stat_summary(fun = mean, geom='point') + geom_hline(yintercept=0.5, linetype="dashed", color="black") + 
+  coord_cartesian(ylim = c(0, 1.0)) + 
+  theme(panel.background = element_rect(fill = 'white'), axis.text = element_text(size=12), 
+        axis.title = element_text(size=14), legend.position = "none", axis.line = element_line(colour = "black"))
+
+```
+
+As a preliminary step, we run a mixed-effects model predicting accuracy in the test from experiment (implicit vs. explicit learning). Note that in the output below, `experiment.ct` is the predictor representing the contrast between experiments with a centered coding.
+
+```{r centre_data, include=FALSE}
+##make sure accuracy is also a factor
+lme_Children_implicit_vs_explicit_fill.df$accuracy = factor(lme_Children_implicit_vs_explicit_fill.df$accuracy)
+
+##centering
+lme_Children_implicit_vs_explicit_fill.df = lizCenter(lme_Children_implicit_vs_explicit_fill.df, list("experiment"))
+```
+
+\singlespacing
+```{r run_lmer}
+
+# this code uses the lme4 package (Bates D, Mächler M, Bolker B, Walker S (2015). 
+# “Fitting Linear Mixed-Effects Models Using lme4)
+
+model_fill <- glmer(accuracy ~ experiment.ct + (1|participantCode), 
+                    control=glmerControl(optimizer = "bobyqa"), family = binomial, 
+                    data = lme_Children_implicit_vs_explicit_fill.df)
+output <- summary(model_fill)
+print(output)
+
+
+```
+
+\doublespacing
+
+The frequentist analysis shows us a significant effect of experiment, with a coefficient of `r round(output$coefficients[2,1], digits = 2)` $(z =$ `r round(output$coefficients[2,3], digits = 2)`, $p < .001$). Proceeding to our Bayes factor analysis, $H_1$ is that explicit learning will lead to better performance in the test -- but how much better? Using the logic above, the maximal difference between the conditions in log-odds is equal to twice the difference between the grand mean in log-odds – i.e. the intercept from our mixed model -  and chance – i.e. 0 (50% in log-odds). Thus the estimated effect we use as our scale factor for the $H_1$ distribution is therefore half this value, so the intercept itself, `r round(output$coefficients[1,1], digits = 2)`. The mixed-effects model also gives us the other element we need in order to calculate a Bayes factor: a summary of the data, in the form of the estimate for the effect of experiment (`r round(output$coefficients[2,1], digits = 2)`) and the standard error of this estimate (`r round(output$coefficients[2,2], digits = 2)`).
+First, we save the three parameters we need from the mixed-effects model: the estimate for the intercept, and the estimate and standard error for the effect of experiment:
+
+\singlespacing
+```{r save-pars}
+
+intercept <- output$coefficients["(Intercept)", "Estimate"]
+
+mean_effect <- output$coefficients["experiment.ct", "Estimate"]
+se_effect <- output$coefficients["experiment.ct", "Std. Error"]
+
+```
+
+\doublespacing
+
+To calculate the Bayes factor, we then plug these values into an R code adaptation of the Dienes calculator [@Dienes2008] ^[The calculator uses numerical integration to combine the likelihood function and the model of $H_1$] by Bence Palfi based on original code by @baguley2010review which is available here https://users.sussex.ac.uk/~dienes/inference/Bence%20Bayes%20factor%20calculator.html); see also the following shiny app implementation https://harry-tattan-birch.shinyapps.io/bayes-factor-calculator/ by Harry Birch). To explain the parameters the function takes: `sd` and `obtained` are the standard error and the estimate of the effect of experiment taken from the mixed-effects model (i.e., the summary of the data). `likelihood` specifies our model of the likelihood function, which here is normal (a $t$ distribution may be preferred for a small sample); `modeloftheory` specifies the distribution of our $H_1$, which here is normal (uniform, Cauchy, and $t$ are alternative possibilities); 
+`tail` specifies whether we want to model $H_1$ as a normal or a half-normal distribution. The scientific theory we are interested in is that explicit learning will be stronger than implicit learning. This is one-tailed, we therefore we therefore model $H_1$ as a half-normal distribution by specifying `tail = 1`. $H_1$ as a half-normal distribution by specifying `tail = 1`.
+
+
+\singlespacing
+```{r bayes-factor, tidy=TRUE, tidy.opts=list(width.cutoff=40) }
+
+# This code uses the BF function authored by Bence Palfi 
+# We enter our sample statistics (sd and obtained) 
+# the likelihood parameter gives us the assumed distribution of the data (normal) 
+# modeloftheory, modeoftheory, scaleoftheory and tail provide the model of h1
+# (i.e. a half normal with a mean/mode of 0 and an sd of 1) 
+
+bf <- Bf(sd = se_effect, obtained = mean_effect, likelihood = "normal",
+         modeloftheory= "normal", modeoftheory = 0, 
+         scaleoftheory = intercept, tail = 1)
+print(bf)
+
+
+
+```
+\doublespacing
+We obtain a Bayes factor of `r round(bf, digits=2)` in favor of $H_1$. This represents extreme evidence for $H_1$ over $H_0$. The standard way to report this is to include the distribution we used to represent $H_1$ in subscript: $BF_{HN(0,`r round(intercept, digits=2)`)}=`r round(bf, digits=2)`$. Here, $HN$ denotes that we are using a half-normal distribution, the first number in parentheses indicates the mode of this distribution, and the second number indicates the scale factor (here, the standard deviation).
+
+A good additional step to take in any Bayes factor analysis is to examine the extent to which the results are sensitive to the particular value chosen for the scale of $H_1$. The standard way of doing this is to report robustness regions [@DienesTheory], or the range of values for which the qualitative conclusion holds: here, that we have at least moderate evidence for $H_1$. For this case study, we test a wide range of values that are reasonable given the scale of the dependent variable. Specifically, we test a range of predicted effects from 0 (no difference between experiments) to 4.595 (participants in one experiment being at chance and participants in the other experiment getting 99% correct). If the resulting Bayes factor is greater than 3 for a wide range of theoretically plausible values, we can consider our conclusion relatively robust.
+
+The following code specifies a range of values, and uses bespoke function `Bf_range` h1_range to calculate Bayes factors using each of these values as scale factor for the $H_1$ distribution:  
+
+\singlespacing
+```{r robustness}
+
+# Bf_range function – this calls the Bf_function above and requires takes the same 
+# parameters except that instead of a single value for the sd of the theory
+# takes a range of values. 
+
+Bf_range <- function(sd, obtained, dfdata = 1, likelihood = c("normal", "t"), 
+                     modeloftheory= c("normal","t","cauchy") , meanoftheory = 0,
+                     modeoftheory = 0, sdtheoryrange, dftheory = 1, tail = 1)
+{
+  x = c(0)
+  y = c(0)
+      
+  # loop through all the values in given range and compute the BF
+  for(sdi in sdtheoryrange)
+  {
+    B = as.numeric(Bf(sd = sd, obtained = obtained, dfdata = dfdata, 
+                      likelihood = likelihood, 
+                      modeloftheory = modeloftheory, 
+                      modeoftheory=modeoftheory, 
+                      scaleoftheory=sdi, 
+                      dftheory = dftheory, tail = tail))
+    if (sdi ==0 ) {B=1} # calculator returns NaN when sdtheory=0; change that return  BF=1
+    x= append(x,sdi)  
+    y= append(y,B)
+      output = cbind(x,y)
+  }
+  
+  output = output[-1,] 
+  colnames(output) = c("sdtheory", "BF")
+  return(output) 
+}
+
+# set up a vector with a range of values in logodds space 
+# from qlogis(50/100) (50% = chance) to  qlogis(99/100) (99% is near ceiling)
+# in incremental steps of 0.001
+
+h1_range = seq(from=qlogis(50/100),to=qlogis(99/100),by=0.001)
+range_test <- Bf_range(sd= se_effect,  obtained =mean_effect, 
+                               likelihood = "normal", 
+                               modeloftheory = "normal", 
+                               modeoftheory=0, 
+                               sdtheoryrange= h1_range, 
+                               tail=1)
+# find values for which BF > 3
+ev_for_h1 <- subset(data.frame(range_test), BF > 3)
+low_threshold <- min(ev_for_h1$sdtheory)
+high_threshold <- max(ev_for_h1$sdtheory)
+print(low_threshold)
+print(high_threshold)
+```
+\doublespacing
+We find a Bayes factor of greater than 3 starting from an estimated effect of `r low_threshold`. The conclusion of evidence for $H_1$ holds for the remainder of the values we test, up to our ceiling of `r high_threshold`. We report this as follows: $RR_{BF>3}[`r low_threshold`,`r high_threshold`]$. As with every step of this analysis, we must evaluate this robustness range in light of our theoretical knowledge to determine how it should affect our confidence in our conclusions. In this case, unless we had a strong *a priori* reason to expect an extremely small difference between experiments (equivalent to participants in one experiment performing at .50 proportion correct and participants in the other performing at .53), we can be confident that our data favor $H_1$ over $H_0$ to at least moderate standards of evidence.
+
+This study demonstrates one situation where using the motivated-maximum approach to derive an estimate for $H_1$ from the output of a mixed-effects model works well. However, the difference between experiments here is large enough that a Bayes factor favoring $H_1$ would be likely regardless of how exactly we model the alternative hypothesis. How does the motivated-maximum approach perform across a range of possible datasets with different effect sizes? We set out to answer this question using simulations.
+
+
+## Simulations {#simulations}
+
+### General framework {#simulations-framework}
+
+We simulate two different experiments. Simulation 1 models a design with one binary within-subjects predictor, analogous to Case 1. Simulation 2 models a design with an interaction between two binary predictors, one within-subjects and one between-subjects, analogous to Case 2. Both simulations model a binary dependent variable, analogous to a 2AFC test, with 20 trials per participant. We vary performance in each condition from .5 proportion correct (chance) to .95 (near ceiling). This results in a range of possible values for baseline performance $l$ (i.e. the condition(s) with the predicted lowest performance) and true effect size $d$. In the main paper, we report simulations with the number of participants $N$ set to 40; in the Supplemental Materials, we report additional simulations with $N = 200$.
+
+For each combination of $l$ and $d$, we simulate 20 datasets. We then analyse each dataset using a binomial generalized linear mixed-effects model implemented using the lme4 library in R [@lme4], including a random intercept for participant and a random slope for the within-subjects predictor. We then calculate a Bayes factor using a half-normal model of $H_1$ with mode 0 and standard deviation $s$. We set $s$ according to the motivated-maximum approach described above. For Case 1, we calculate the Bayes factor for the main effect of the within-subjects predictor, with $s$ set to equal the intercept term from the mixed-effects model. For Case 2, we calculate the Bayes factor for the interaction between the two predictors, with $s$ set to equal twice the intercept from the mixed-effects model. In the Supplemental Materials, we additionally report results from simulations using an alternative estimate for Case 2, where $s$ is set to the main effect of test-session from the mixed-effects model.
+
+```{r BF-category-table, echo=FALSE, warning=FALSE, message=FALSE}
+
+# define categories
+BF_limits <- c("$BF \\leq \\frac {1}{100}$",
+              "$\\frac {1}{100} < BF \\leq \\frac {1}{30}$", 
+              "$\\frac {1}{30} < BF \\leq \\frac {1}{10}$", 
+              "$\\frac {1}{10} < BF \\leq \\frac {1}{3}$", 
+              "$\\frac {1}{3} < BF \\leq 3$", 
+              "$3 < BF \\leq 10$", 
+               "$10 < BF \\leq 30$", 
+               "$30 < BF \\leq 100$", 
+               "$100 < BF$")
+
+# define BF category labels
+
+BF_cats <- c("Extreme evidence for H\\textsubscript{0}", "Very strong evidence for H\\textsubscript{0}", 
+             "Strong evidence for H\\textsubscript{0}", "Moderate evidence for H\\textsubscript{0}", 
+             "No evidence either way", "Moderate evidence for H\\textsubscript{1}", 
+             "Strong evidence for H\\textsubscript{1}", "Very strong evidence for H\\textsubscript{1}", 
+             "Extreme evidence for H\\textsubscript{1}")
+
+# set up data frame
+df <- data.frame(BF_limits <- BF_limits, BF_cats <- BF_cats)
+
+# kable
+kable(df, row.names = NA, 
+      col.names = c("Bayes factor", "Category"), 
+caption = "Classification of Bayes factors into evidence categories, drawn from Jeffreys (1939) and Lee and Wagenmakers (2014).", escape = F)
+
+```
+
+Since we generate and analyse 20 datasets for each combination of parameters, we also generate 20 unique Bayes factors which will naturally vary. To characterize the most common qualitative outcome, in the figures below we plot the modal Bayes factor category across the 20 analyses. Table \ref{tab:BF-category-table} shows how we categorized each Bayes factor [@jeffreysbook; @lee2014bayesian].
+
+Full details of the simulations are given in the Supplemental Materials. All code and output is made publicly available on GitHub at https://github.com/silveycat/bayes-factor.
+
+### Case 1 {#simulation-1}
+
+In Simulation 1, we model an experiment corresponding to Case 1, with one binary within-subjects predictor. We model $H_1$ as a half-normal distribution with a mode of 0, with the standard deviation set to equal the intercept from the mixed-effects model. Do the Bayes factors we obtain using this method correspond to what we would expect, i.e., showing evidence for $H_0$ where effects are zero or near-zero, showing evidence for $H_1$ where effects are large, and showing no evidence where the small size of the effect and the imprecision of the estimate make the data ambiguous?
+
+Figure \@ref(fig:sim-1-N-40) shows the modal Bayes factors that result from our simulations. As in Case 1, we can think of this simulated experiment as comparing participants' performance following two different types of training (LV vs HV). The $x$-axis shows performance in the HV condition in log-odds. The $y$-axis shows the true effect of condition, or the log-odds difference between performance with the HV and LV items. We see that evidence for $H_1$ accumulates rapidly from an effect size of around 0.5 log-odds and higher. Evidence for the null accumulates more slowly [@Weiss1997], as we can see from the wider bands of blue in Figure \@ref(fig:sim-1-N-40). The dotted line marks a true effect of 0. We observe that along this line and slightly above it, i.e., where effects are 0 or very close to 0, we get evidence for $H_0$. We also consistently obtain evidence for $H_0$ where the effect is below 0, i.e., in the opposite direction from our prediction, with the degree of evidence increasing the larger the magnitude of the negative effect. While in this particular paradigm a negative effect is implausible in many cases  (i.e. in all those cases where it means that the LV condition is below chance) it is important to note that it is reasonable that the evidence for $H_0$ should increase in this way. To a researcher new to Bayes factors, this may seem counter-intuitive -- doesn't a large negative evidence suggest evidence for an effect in the opposite direction, rather than evidence for $H_0$? But the key thing to remember about Bayes factors is that they test only the relative probability of the data under two competing hypotheses. Where $H_1$ is modeled as a half-normal with a mode of 0, instantiating our directional prediction, a negative effect is thus more consistent with $H_0$ than with $H_1$.  
+
+
+
+```{r sim-1-N-40, fig.cap = "Results from a simulation calculating Bayes factors for the effect of a binary within-subjects predictor in a sample of 40 participants, using the intercept from a mixed-effects model as the estimated effect. The $x$-axis shows performance in the cell predicted to be highest (e.g., performance in HV), and the y-axis shows true effect size (e.g., performance in HV minus performance in LV). Units are log-odds, with corresponding proportion correct in parentheses. Colours show modal Bayes factor category across 20 generated datasets and analyses.", echo=FALSE, warning=FALSE, message=FALSE}
+
+# this code reads in data files from a folder called "output", which can be downloaded at https://github.com/silveycat/bayes-factor/tree/master/output
+
+# function for getting mode
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# read in data
+results <- read.csv("output/sim_1_results_40_final.csv")
+
+# calculate diff between cell2 and cell1 as a variable
+results$effect <- round(as.numeric(results$cell_2) - as.numeric(results$cell_1), 1)
+
+# group data by cell1 and effect
+grouped_data <- group_by(results, cell_2, effect)
+
+# get modal Bayes factor and make an ordered factor
+summarised_data <- summarise(grouped_data, mode = getmode(BF_cat))
+summarised_data$mode <- ordered(summarised_data$mode)
+
+# brewer values (colour-blind friendly)
+color_values = c("#2166ac", "#4393c3", "#92c5de", "#d1e5f0", "#f7f7f7", "#fddbc7", "#f4a582", "#d6604d", "#b2182b")
+
+heatmap <- ggplot(summarised_data, aes(x=cell_2, y=effect, fill=mode))
+heatmap + geom_tile() + scale_fill_manual("Evidence category", limits=c(1,2,3,4,5,6,7,8,9), 
+                                          values = color_values,
+                                          labels=c("Extreme H0", "V strong H0", "Strong H0", "Mod H0", 
+                                                   "No evidence", 
+                                                   "Mod H1", "Strong H1", "V strong H1", "Extreme H1")) +
+  scale_x_continuous("\nPerformance in HV condition", limits=c(-0.1,3.1), 
+                     breaks = c(0,1,2,3), 
+                     labels = c("0 (.5)", "1 (.73)", "2 (.88)", "3 (.95)")) + 
+  scale_y_continuous("Effect (difference between HV and LV) \n", 
+                     limits = c(-2.1,2.1)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  ggtitle("Case 1 (N = 40)")
+
+```
+
+There are two further observations we can make from Figure \@ref(fig:sim-1-N-40). One is that we do not always see evidence for $H_0$ where the effect is truly 0. Towards the left of the plot, where the true effect is 0 but performance in the HV condition is lower than around 0.5 log-odds (corresponding to .62 proportion correct), we instead see no evidence either way. This happens because performance in both cells of the design is low, meaning the intercept of the mixed-effects model is correspondingly low: effectively, there is less `room to move' and we are therefore looking for a smaller effect. All other things being equal, small effects are harder to find evidence both for and against. The outcome shows that if the condition meant to have the highest score is in fact very low, there is a de facto floor effect, there is no room to find a difference between conditions; the Bayes factor appropriately reflects this state of affairs by indicating no evidence.  
+
+A more general observation is that, unless the effect is in the opposite direction from predicted- which is implausible for all cases where this would mean performance in the LV condition is below chance- we rarely get more than moderate evidence (BF<$\frac{1}{3}$) for $H_0$ in a sample of 40 participants. The results in the supplementary materials show that this can be improved by increasing N – with N=200, the modal Bayes Factor category is strong evidence fo $H_0$ (BF<$\frac{1}{10}$). (Also, with regard to floor effects, while we still see a region of no evidence where baseline performance is low, this is less pronounced than for the smaller sample). However, obtaining a large sample may be infeasible, for example in developmental research.  Thus, we may instead wish to consider this in setting our Bayes Factor thresholds. We return to consider these implications in the Discussion.  
+
+
+### Case 2 {#simulation-2}
+
+Next, we simulate the more complex Case 2, involving an interaction between two binary predictors. As outlined above, this simulates an experiment where participants in two conditions (low-variability training, LV, and high-variability training, HV) take part in a pre-test and a post-test. Here, we are interested in the interaction effect, or how improvement from pre-test to post-test differs between conditions. For the cases illustrated below, we assume that performance in the pre-test is equivalent across the two conditions. In the Supplementary Materials (Section 2 Results for Interaction when pre-test varies across condition) we demonstrate that when this assumption is relaxed the overall pattern of evidence for $H_0$ and $H_1$ is reasonably similar).  
+
+We consider two plausible situations: a) performance in the pre-test in both conditions is at chance (.5 proportion correct = 0 log-odds); b) performance in the pre-test in both conditions is above chance (.73 proportion correct = 1 log-odds, similar to average pre-test performance in @logan1991training). In the following plots, the x-axis shows post-test performance in the condition we expect to improve more under $H_1$, i.e., the HV condition. As for Case 1, the y-axis shows the veridical effect we are interested in: here, the interaction effect. Because we assume pre-test performance is equivalent across conditions, the interaction here equates to the difference in post-test performance between conditions.
+
+Figure \ref{fig:sim-2-chance} shows the results in the situation where performance in the pre-test in both conditions is at chance. We can see that, compared to Case 1, the region of no evidence is wider: with the same sample size, it is harder to get evidence either for $H_0$ or $H_1$ for an interaction. Again, this is expected, and provides further reassurance that the motivated-maximum approach produces intuitively sensible results.
+
+```{r sim-2-chance, fig.cap = "Results from a simulation calculating Bayes factors for the interaction of two binary predictors in a sample of 40 participants, using 2* the intercept from a mixed-effects model as the estimated effect. Performance in the two cells corresponding to the pre-test is fixed at .5 proportion correct (0 log-odds). The $x$-axis shows performance in the post-test cell predicted to be highest (e.g., performance in post-test in the HV condition), and the y-axis shows true interaction effect size (e.g., improvement from pre-test to post-test in the HV condition minus the equivalent in the LV condition). Colours show modal Bayes factor category across 20 generated datasets and analyses.", echo=FALSE, warning=FALSE, message=FALSE}
+
+# this code reads in data files from a folder called "output", which can be downloaded at https://github.com/silveycat/bayes-factor/tree/master/output
+
+# function for getting mode
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# read in file
+results_collect <- read.csv("output/sim_2_results_0_final.csv")
+
+
+# calculate interaction effect as a variable
+results_collect$effect <- round((as.numeric(results_collect$cell_4) - as.numeric(results_collect$cell_3)) - 
+                                  (as.numeric(results_collect$cell_2) - as.numeric(results_collect$cell_1)), 1)
+
+# group data
+grouped_data <- group_by(results_collect, cell_4, effect)
+
+# summarise Bayes factor category
+summarised_data <- summarise(grouped_data, mode = getmode(BF_GM_cat))
+
+# mode is ordered factor
+
+summarised_data$mode <- ordered(summarised_data$mode)
+
+# colour brewer values
+color_values = c("#2166ac", "#4393c3", "#92c5de", "#d1e5f0", "#f7f7f7", "#fddbc7", "#f4a582", "#d6604d", "#b2182b")
+
+
+heatmap <- ggplot(summarised_data, aes(x=cell_4, y=effect, fill=mode))
+heatmap + geom_tile() + scale_fill_manual("Evidence category", limits=c(1,2,3,4,5,6,7,8,9), 
+                                          values = color_values,
+                                          labels=c("Extreme H0", "V strong H0", "Strong H0", "Mod H0", 
+                                                   "No evidence", 
+                                                   "Mod H1", "Strong H1", "V strong H1", "Extreme H1")) +
+  scale_x_continuous("\nHV post-test performance", limits=c(-0.1,3.1), 
+                     breaks = c(0,1,2,3), 
+                     labels = c("0 (.5)", "1 (.73)", "2 (.88)", "3 (.95)")) + 
+  scale_y_continuous("Interaction effect \n", limits = c(-2.1,2.1)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  ggtitle("Performance in pre-test at chance")
+
+```
+
+Figure \ref{fig:sim-2-more-above-chance} shows the results in the situation where performance in the pre-test in both conditions is above chance. We see that in this case, since the grand mean is higher and we are therefore looking for a larger effect, we obtain evidence for $H_0$ in a wider range of cases where the interaction effect is non-zero. We may then prefer to use an estimate based on the main effect (see Supplemental Materials) as a more conservative approach when seeking evidence for $H_0$ with this type of experimental design. However, as for every approach put forward in this paper, it should not be applied as a default in every situation. Where we have reason to expect that mean performance will be relatively low, either from previous results or the current study, the estimate based on twice the grand mean may be appropriate.
+
+```{r sim-2-more-above-chance, fig.cap = "Results from a simulation calculating Bayes factors for the interaction of two binary predictors in a sample of 40 participants, using 2* the intercept from a mixed-effects model as the estimated effect. Performance in the two cells corresponding to the pre-test is fixed at .73 proportion correct (1 log-odds). The $x$-axis shows performance in the post-test cell predicted to be highest (e.g., performance in post-test in the HV condition), and the y-axis shows true interaction effect size (e.g., improvement from pre-test to post-test in the HV condition minus the equivalent in the LV condition). Colours show modal Bayes factor category across 20 generated datasets and analyses.", echo=FALSE, warning=FALSE, message=FALSE}
+
+# this code reads in data files from a folder called "output", which can be downloaded at https://github.com/silveycat/bayes-factor/tree/master/output
+
+# function for getting mode
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# read in file
+results_collect <- read.csv("output/sim_2_results_1_final.csv")
+
+
+# calculate interaction effect as a variable
+results_collect$effect <- round((as.numeric(results_collect$cell_4) - as.numeric(results_collect$cell_3)) - 
+                                  (as.numeric(results_collect$cell_2) - as.numeric(results_collect$cell_1)), 1)
+
+# group data
+grouped_data <- group_by(results_collect, cell_4, effect)
+
+# summarise Bayes factor category
+summarised_data <- summarise(grouped_data, mode = getmode(BF_GM_cat))
+
+# mode is ordered factor
+
+summarised_data$mode <- ordered(summarised_data$mode)
+
+# colour brewer values
+color_values = c("#2166ac", "#4393c3", "#92c5de", "#d1e5f0", "#f7f7f7", "#fddbc7", "#f4a582", "#d6604d", "#b2182b")
+
+
+heatmap <- ggplot(summarised_data, aes(x=cell_4, y=effect, fill=mode))
+heatmap + geom_tile() + scale_fill_manual("Evidence category", limits=c(1,2,3,4,5,6,7,8,9), 
+                                          values = color_values,
+                                          labels=c("Extreme H0", "V strong H0", "Strong H0", "Mod H0", 
+                                                   "No evidence", 
+                                                   "Mod H1", "Strong H1", "V strong H1", "Extreme H1")) +
+  scale_x_continuous("\nHV post-test performance", limits=c(-0.1,3.1), 
+                     breaks = c(0,1,2,3), 
+                     labels = c("0 (.5)", "1 (.73)", "2 (.88)", "3 (.95)")) + 
+  scale_y_continuous("Interaction effect \n", limits = c(-2.1,2.1)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  ggtitle("Performance in pre-test .73")
+
+```
+
+More generally, we emphasize the importance of taking into account the specific theoretical background and experimental design of the study in question when working out a motivated maximum. For example, in a situation where the two predictors were training variability (LV vs. HV) and item novelty (seen vs. unseen), reasonable assumptions could lead to using the intercept (rather than twice the intercept) as an estimate for the interaction effect (see Supplemental Materials for an outline of the logic). Indeed, when the intercept is low relative to chance, it can serve as an estimate for both main effects and interactions [@dienes2012;@ziori2015].
+
+
+### Model comparison method
+
+The simulations reported above and in the Supplemental Materials demonstrate that the motivated-maximum approach, where we use estimates from mixed-effects models to inform our model of $H_1$, produces intuitively sensible results. To produce these results, we used an R code adaptation of the Dienes calculator [@Dienes2008]. This calculator takes as input a summary of the data and a distribution for $H_1$. The calculator then approximates the probabilities of the data under $H_1$ and a point null hypothesis $H_0$ and returns their ratio, i.e., the Bayes factor.
+
+An alternative approach in the same spirit is to use Bayesian model comparison [@schad2021workflow]. The first step in this method is to build a full Bayesian mixed model of the data. Such models use Bayesian methods to estimate the parameters of mixed-effects models, returning an estimate and an associated credible interval within which we can be confident to a specific probability that the true value of the parameter lies. While credible intervals are sometimes used to argue for the presence of an effect (e.g., if the 95% credible interval does not cross 0), this is not an appropriate inference: the credible interval tells us nothing about the likelihood of the data under $H_0$ [@schad2021workflow]. Instead, the appropriate way to use these models to quantify evidence for $H_1$ compared to $H_0$ is to compute a Bayes factor based on comparing two models. It is important to realize that this method also requires the researcher to require define an informed prior for the hypothesis being tested- i.e. a model of $H_1$. Specifically, the researcher must specify a full mixed model which includes the parameter of interest and, as in the Dienes calculator approach, the prior for this parameter represents $H_1$. We can use the motivated maximum approach to determine this prior, just as we did for the Dienes calculator. 
+
+The researcher specifies a full mixed model which includes the parameter of interest; as in the Dienes calculator approach, the prior for this parameter represents $H_1$. The researcher then specifies a null model where the parameter of interest is excluded, meaning it is set to zero. The probability of the data under each model is then approximated using bridge sampling [@gronau2020]. This approach is likely to be more robust than the Dienes calculator approach since it compares entire models, rather than using a summary of the data; however, it also requires the researcher to have expertise in running fully Bayesian analyses.
+
+As a partial check on whether these conceptually similar approaches in fact produce similar results, we compared the Bayes factors resulting from each approach for a subset of the datasets we simulated for Case 1 (the simple design with one within-subjects predictor, with a sample size of $N = 40$). For the model comparison approach, we used brms [@brms] to construct the full model and the null model. The model had an identical structure in terms of fixed effects and random effects to the lmer model used to derive the data summary for the calculator. 
+
+Default priors (see supplementary materials for details) were used for all parameters except the main effect of interest. Note that this follows the principle that informed priors should be used for hypothesis testing, which applies to the effect of interest, while vague default priors are appropriate for estimation which is what we wish to do for all the effects which we are not of direct interest. The prior for the main effect of interest was the same as the $H_1$ distribution we used for the Dienes calculator approach: a half-normal distribution with a mode of 0 and a standard deviation set to equal the intercept from the  model of the data. The null model was identical to the full model except that the fixed effect of interest was set to 0.^[Note that the random by participant slope for condition is thus maintained in the null model- only the fixed effect is removed. @vanDoornBFforMM and @LindeModelComparison refer to this as a "balanced null", which is recommended for testing differences between means] Note that since we use the same priors for $H_1$ as with the calculator method, we still apply the motivated maximum approach. Our comparison between the methods here is thus not about how we obtain the prior, but rather on whether the results change when we compare entire models rather than extracting a data summary for the calculator. Full details of the model comparison process are provided in the Supplemental Materials.  
+
+
+```{r model-comparison-table, echo=FALSE, warning=FALSE, message=FALSE}
+# this code reads in data files from a folder called "output", which can be downloaded at https://github.com/silveycat/bayes-factor/tree/master/output
+
+
+# function for getting mode
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# define BF category labels
+
+BF_cats <- c("Extreme evidence for H\\textsubscript{0}", "Very strong evidence for H\\textsubscript{0}", 
+             "Strong evidence for H\\textsubscript{0}", "Moderate evidence for H\\textsubscript{0}", 
+             "No evidence either way", "Moderate evidence for H\\textsubscript{1}", 
+             "Strong evidence for H\\textsubscript{1}", "Very strong evidence for H\\textsubscript{1}", 
+             "Extreme evidence for H\\textsubscript{1}")
+
+# read in file
+results <- read.csv("output/model_comparison_results_40.csv")
+
+# calculate diff between cell2 and cell1 as a variable
+results$effect <- round(as.numeric(results$cell_2) - as.numeric(results$cell_1), 1)
+
+# group data by cell1 and effect
+grouped_data <- group_by(results, cell_1, effect)
+
+# summarise
+summarised_data <- summarise(grouped_data,
+                             modal_d = getmode(BF_1_cat), 
+                             modal_b = getmode(BF_2_cat))
+
+
+# add labels for the modes
+bf_labels_d <- c()
+bf_labels_b <- c()
+for (r in 1:nrow(summarised_data)) {
+  d_cat <- BF_cats[[summarised_data$modal_d[[r]]]]
+  bf_labels_d <- c(bf_labels_d, d_cat)
+  b_cat <- BF_cats[[summarised_data$modal_b[[r]]]]
+  bf_labels_b <- c(bf_labels_b, b_cat)
+}
+
+# add to data frame
+summarised_data$cat_d <- bf_labels_d
+summarised_data$cat_b <- bf_labels_b
+
+# drop original numbers
+summarised_data <- subset(summarised_data, select = -c(modal_d, modal_b))
+
+# kable
+kable(summarised_data, row.names = NA, 
+      col.names = c("Baseline", "Effect", 
+                    "Dienes calculator", "Model comparison"), 
+caption = "Bayes factors produced by the Dienes calculator and by model comparison using brms. Both approaches modeled
+$H_1$ as a half-normal with a mode of 0, with the standard deviation set to the intercept from a frequentist mixed-effects model of the
+ data. Baseline = performance in log-odds in the cell predicted to be the lowest (e.g., pre-test). Effect = true 
+difference between baseline performance and performance in the other cell (e.g., post-test). Evidence categories reported are the modal category of Bayes factors across 10 simulated datasets for each combination of baseline and effect.", escape = F)
+
+```
+
+
+The results are presented in Table \ref{tab:model-comparison-table}. As the table shows, the two approaches agree qualitatively in all cases, in terms of whether the evidence supports $H_0$, $H_1$, or is ambiguous. This suggests that at least for this simple case, the two approaches produce comparable results. 
+
+
+
+
+
+
+```{r scatterplot1,  include=FALSE}
+# file read in above chunk
+
+# calculate diff between cell2 and cell1 as a variable
+
+library(gridExtra)
+results$truth[results$effect>0] <- "H1" 
+results$truth[results$effect<=0] <- "H0" 
+results$logBF_Dienes <-log(results$BF_1) 
+results$logBF_ModelComp <-log(results$BF_2) 
+
+
+p.H1.true = ggplot(subset(results,truth=="H1"), aes(x=logBF_Dienes, y=logBF_ModelComp)) + 
+  geom_point()+scale_x_continuous(limits = c(0, 75))+scale_y_continuous(limits = c(0, 75))+theme_classic()+
+  #geom_abline(intercept=0,slope=1)+
+ geom_hline(yintercept=log(3),color="red",linetype ="dotted")+
+   geom_vline(xintercept=log(3), colour="blue",linetype ="dotted")+
+labs(y="log transformed BF from Model Comparison", x="log transformed BF from Dienes calculator")+
+  geom_abline(slope=1, intercept = 0)
+
+
+p.H0.true = ggplot(subset(results,truth=="H0"), aes(x=logBF_Dienes, y=logBF_ModelComp)) + 
+  geom_point()+scale_x_continuous(limits = c(-5, 2))+scale_y_continuous(limits = c(-5, 2))+theme_classic()+
+#  geom_abline(intercept=0,slope=1)+
+geom_hline(yintercept=log(1/3),color="red", linetype ="dotted")+
+   geom_vline(xintercept=log(1/3), colour="blue", linetype="dotted")+
+labs(y="log transformed BF from Model Comparison", x="log transformed BF from Dienes calculator")+  geom_abline(slope=1, intercept = 0)
+
+
+
+
+```
+
+
+
+```{r scatterplot, warning=FALSE,messages = FALSE,fig.cap="Scatter plot of the Bayes factors (log transformed) produced by the Dienes Calculator and the Model Comparison Methods. Different data points are from  different runs with different effect sizes and baselines (see Table 2). We separate the case where $H_1$ is true and $H_0$ is true. The line of identity is in black. The dotted lines shows where the threshold of substantial evidence for H1 (BF>3) and for the null (BF< $\\frac{1}{3}$) was found with each method (Dienes calculator blue, Model comparison red.)", echo=FALSE}
+grid.arrange(p.H1.true,p.H0.true, ncol=2)
+
+```
+
+
+Figure \ref{fig:scatterplot} shows scatter plots comparing the Bayes Factors computed by the two approaches, separting cases where $H_1$ is true and $H_0$ is true. While the points are not quite evenly scattered around the line of identity, they fairly closely follow the line and the departures do not involve any qualitative change in what conclusion would follow from the Bayes factors, in line with the results in Table \ref{tab:model-comparison-table}.
+
+
+
+# Discussion
+
+We demonstrate a method for calculating Bayes factors to quantify the evidence for $H_0$ and $H_1$, using $H_1$ distributions constrained by estimates from mixed-effects models in what we call the motivated-maximum approach. We show using simulations that modelling $H_1$ as a half-normal distribution with the standard deviation set to the intercept (in the case of finding evidence for or against a main effect) or twice the intercept (in the case of finding evidence for or against an interaction) produces intuitively sensible results across a range of plausible cases. It is important to emphasize, however, that this approach should not be applied as a default in all situations. Researchers should base their model of $H_1$ on theoretical expectations informed by previous literature. However, our intent here is to provide an option researchers can consider using in cases where an estimate of the predicted effect is not directly available and it has the further advantage that it can be used in conjunction with frequentist mixed-effects models, which are already widely used across the psychological sciences. Note that, critically, the model we use embodies theoretical claims: i) the effect occurs in a certain direction; ii) there is a minimum value of performance we can expect to see in any cell (chance in our example) and iii) it is possible that the intervention postulated might not move performance above this minimum level. 
+
+The results also illuminate some general implications for Bayes factor analyses, both using this method and more generally. Firstly, in the case of low overall performance, we do not find evidence for $H_0$ even when the effect in question is veridically zero. This problem is exacerbated for small sample sizes (see Supplemental Material). Secondly, finding evidence for or against an interaction is much harder than finding evidence for or against a main effect. Thirdly, it is harder to get strong evidence for $H_0$ than strong evidence for $H_1$. Indeed in case 1, when N=40, when the effect was verdically 0 the Bayes Factors generally met the criteria for moderate (BF>$\frac{1}{3}$) but not for strong (BF<$\frac{1}{10}$) evidence.   As suggested by @Weiss1997, this may be practical grounds for using asymmetric thresholds for accepting evidence for $H_0$ versus $H_1$ [see also @jeffreysbook]. For example, a researcher might choose to accept only a Bayes factor above 10 as evidence in favor of $H_1$, while accepting a Bayes factor below $\frac{1}{3}$ as evidence in favor of $H_0$. Bear in mind this implicitly presumes that $H_0$ is more a priori likely than $H_1$^[Note that a likely consequence of this decision is that evidence in favor of $H_0$ will be less robust than evidence in favor of $H_1$. A sensitivity analysis using robustness regions, such as that reported for the case study above, would demonstrate this.]
+
+Is it legitimate to base the model of $H_1$ (the “prior”, after all) on aspects of the data? @deHeide2021 argue that priors where part of the model is fixed by the data should not be used with optional stopping because the concept of "calibration" (i.e. whether the Bayes factor reflects evidence appropriately) does not apply to such priors (because there is no fixed model of $H_1$ to test calibration for). While their argument concerned optional stopping (stopping when the Bayes factor reaches a desired level of evidence) one might also wonder if the point does not apply generally to any use of Bayes factors. However, one can still show whether the model of $H_1$ does reflect evidence appropriately by another means, namely by the concept of severe testing [see @vanpaemel2020strong]. A severe test is one that can generate an extreme Bayes factor against a theory if the theory is false [@dienes2023]. A Bayes factor can behave like this because it is a measure of evidence. Consider for example using the effect size in the sample to fix the predicted effect size in the model of $H_1$, in order to test whether that effect exists using the very same sample. Clearly in this case one could not get evidence against a theory predicting an effect, even if the theory were false. Thus the concept of a severe test shows that it is inappropriate to fix e.g. the SD of a half-normal (or the scaling factor of a Cauchy) to the value of the sample effect size [@dienes2023]. But in terms of the heuristic we advise, comparison of Figure 2 against figures 4 and 5 in the supplementary materials where the N is increased, shows a study can provide a severe test of a theory, whether the theory predicts an effect or no effect. That is, if either $H_0$ or $H_1$ is true, as N increases the Bayes factor tends become more extreme in support of the true hypothesis and against the false one [cf. @DienesTheory].    
+
+One might still ask, is it not better though to always fix the model of $H_1$ without reference to the data if one can? On the contrary it can be preferable to use the data just as we do. Consider the High Variability/Low Variability (HV vs LV) study we illustrated in case 1 and where the intercept is very small because HV produced little effect. The Bayes factor would be close to 1; appropriately so because there is no room to see if LV did worse.  If we used an estimate of HV effect from past studies we may get evidence against the HV-LV difference; but that would be inappropriate. So the data dependent model of $H_1$ automatically deals with what are effectively floor effects because the basic manipulation was not as effective as expected [@DienesTheory].  
+
+Finally, we show that using the the motivated-maximum method to inform the prior for $H_1$ while using estimates from frequentist mixed-effects models and the Dienes calculator, produces similar results to the method of using the same motivated-maximum method to set $H_1$ but comparing two fully Bayesian models, at least in the limited range of cases which we have tested. Our approach is simpler in that it can be used immediately by researchers already working with lmer without having to learn how to fit Bayesian hierarchical models. It is also notably faster: in a quick comparison, running a mixed-effects model and calculating the Bayes factor using our method took 0.3 seconds, whereas using bridge sampling to compare two fully Bayesian models took 11 minutes. However, there are some situations in which the model comparison approach may be preferred, despite its steeper learning curve for the user. For example, if the mixed-effects model fails to converge, this affects the trustworthiness of both the frequentist results and the Bayes factor based on these estimates. Although it is common in these cases to selectively exclude random effects until the model converges, this approach is not ideal [@eager2017mixed]. Indeed, researchers may turn to using Bayesian mixed models primarily because they solve the convergence problems associated with the lmer package. One alternative approach would be to use a Bayesian model implemented in brms [@brms] or equivalent software rather than an lmer model, to generate the parameter estimates and standard errors. Note that in this case, we are just using the model for estimation, and default uninformative priors should be used for all fixed and random effects, including the one of interest. The estimate of the fixed effect of interest and the error term  –can then be extracted for the coefficient of interest exactly as with lmer (though note that in brms the equivalent of standard error in lmer is the standard deviation of the posterior distribution for the parameter, labelled as Est.Error). and fed into the Bayes factor calculation for hypothesis testing. While still more time-consuming than running an lmer model, this would provide more robust estimates for use in the Bayes factor calculation, without requiring the researcher to run and compare two Bayesian models.     
+
+The motivated-maximum method as presented here has limitations. In particular, the method cannot currently be applied to the case of a continuous predictor. We are currently working on developing an alternative method for this scenario. In the meantime, the ratio of scales or the ratio of means [@DienesTheory] are appropriate heuristics that can be used in this case. It is also important to reiterate that the simulations reported above assume that performance in all cells of each experiment is at least at chance. If a researcher's specific experimental design includes a reason why participants might perform below chance (e.g., the lure of a particular distractor), the simulation results may not offer a complete picture of the performance of the motivated-maximum approach when used on the resulting data. More generally, we reiterate that the specific theoretical background and experimental design of a given study should always inform the selection of an appropriate model of $H_1$.
+
+# Conclusion
+
+We describe a method for using Bayes factors to quantify the evidence for and against a given alternative hypothesis $H_1$ relative to a null hypothesis $H_0$. In particular, we describe how to use the method pioneered by @Dienes2014 in conjunction with estimates obtained from frequentist mixed-effects models, both as a summary of the data and as a way of constraining the expected effect size under $H_1$ where estimates based on previous literature are unavailable. We call this the motivated-maximum approach. Using simulations, we show that the motivated-maximum approach performs well across a range of veridical effect sizes, and that in simple cases, it produces qualitatively similar results to the method of Bayesian model comparison when using the same model of $H_1$. We hope this paper will make Bayes factors more accessible to researchers who currently use frequentist mixed-effects models in their analyses and who are unsure exactly what effect size they should expect to observe. However, we emphasize that there is no substitute for properly thinking about what a theory predicts, and that as with all approaches, ours should be applied thoughtfully and not as a default.
+
+
+\newpage
+
+# Author Footnotes
+
+## Author affiliations
+
+C.Silvey, UCL, Division of Psychology and Language Sciences  
+Z. Dienes, University of Sussex, Department of Psychology  
+E.Wonnacott, University of Oxford, Department of Education (corresponding author)  
+
+
+## Author contributions 
+
+E. Wonnacott developed the motivated-maximum approach and worked out the estimates for each case. C. Silvey designed, coded and analysed the simulations. Z. Dienes originally developed the method for Bayes factor calculation and advised on its implementation. C. Silvey drafted the paper. All authors contributed to revising the paper and approved the final version.  
+
+
+## Conflicts of Interest
+
+The authors declare that there were no conflicts of interest with respect to the authorship or the publication of this article.
+
+## Funding
+
+The research was developed while C. Silvey was funded by a British Academy Postdoctoral Fellowship, Z. Dienes was funded by a grant from the Economic and Social Research Council (ESRC; grant number ES/P009522/1), and E. Wonnacott was funded by ESRC grant ES/K013637/2 and Leverhulme RPG-2019-160.
+
+
+\newpage
+
+
+# References
+
